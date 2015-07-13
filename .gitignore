@@ -1,0 +1,5 @@
+#Ignore the downloaded file
+*.zip
+#Ignore the unzipped file
+final/*
+
