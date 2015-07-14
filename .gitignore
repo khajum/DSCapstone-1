@@ -1,5 +1,6 @@
 #Ignore the downloaded file
 *.zip
+*.Rhistory
 #Ignore the unzipped file
 final/*
 
