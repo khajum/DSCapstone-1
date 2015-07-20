@@ -6,7 +6,7 @@ output: html_document
 ###Synopsis
 The capstone project is about creating a next word typing prediction application. For the capstone project we have been provided a data from a corpus called HC Corpora <http://www.corpora.heliohost.org)>. The data will be used to create a predictive algorithm. In order to build the algorithm it is required to perform data analysis. This document covers the steps taken. 
 
-####Load librries
+####Load libraries
 ```{r,echo=TRUE,results='hide',message=FALSE}
 library(NLP)
 library(tm)
@@ -16,7 +16,6 @@ library(wordcloud)
 library(RWeka)
 library(RColorBrewer)
 library(SnowballC)
-
 ```
 
 ### Data Processing 
@@ -92,15 +91,14 @@ As observed from above the files are around 200 MB per file. Blogs and News corp
 For performing the predictive model we need to application to be void of certain cases. The goal is to get to clean data set that will help us achieve our final goal. We will use `tm` <https://cran.r-project.org/web/packages/tm/index.html> package to make the work easier of text mining.
 
 The following cleanups will be performed.
-- Lower case
-- Remove puntuation
-- Remove numbers
-- Remove URL
-- Remove White Space
+1. Lower case
+2. Remove puntuation
+3. Remove numbers
+4. Remove White Space
 
 For predicting the next word, it is not very useful if we have to predit "See you at 8", not having numbers is going to help with the scenario. Our model can't predict it, and won't help the user. 
 
-Stop words: Based on research of various articales it is clear that removing stop words would be counter productive and would change the meaning completely. Stop word removal would be counter productive. For our approach we feel having the correct n-Grams will be more valuable for prediction. It is proved below my analysis
+Stop words: Based on research of various articles it is clear that removing stop words would be counter productive and would change the meaning completely. We start the analysis without using stop words and prove that it is the correct anlysis.
 
 
 ```{r,echo=TRUE,results='hide'}
@@ -143,8 +141,6 @@ con <- gzfile("./milestoneReport/clean.rds")
 corpus <- readRDS(con)
 close(con)
 corpus_df <-data.frame(text=unlist(sapply(corpus,`[`, "content")), stringsAsFactors = FALSE)
-
-
 
 # Function for nGram
 ngramTokenizer <- function(theCorpus, ngramCount) {
@@ -211,4 +207,10 @@ plot_ngrams(quagrams)
 
 Analyzing the unigrams, we can see that the top 20 words are quite similar between the data sets. Most of the words are stopwords in English. Hence keeping these as they will be critical in determining the predicted word. 
 
+### Next Steps
+This project requires to develop an online application with user-friendly interface  using Shiny Server. To take the size and speed of the model into account, we will only implement 2 or 3 grams algorithm for our online application. 
+
+The shiny application should consider:
+1. Detecting the nearest 1 to 3 words of users' typing and taking them as the inputs of model.
+2. Return the predictions of model to the user interface.
 
