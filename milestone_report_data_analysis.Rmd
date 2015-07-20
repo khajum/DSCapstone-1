@@ -1,0 +1,214 @@
+---
+title: "Data Analysis - Capstone Project JHU"
+output: html_document
+---
+
+###Synopsis
+The capstone project is about creating a next word typing prediction application. For the capstone project we have been provided a data from a corpus called HC Corpora <http://www.corpora.heliohost.org)>. The data will be used to create a predictive algorithm. In order to build the algorithm it is required to perform data analysis. This document covers the steps taken. 
+
+####Load librries
+```{r,echo=TRUE,results='hide',message=FALSE}
+library(NLP)
+library(tm)
+library(knitr)
+library(ggplot2)
+library(wordcloud)
+library(RWeka)
+library(RColorBrewer)
+library(SnowballC)
+
+```
+
+### Data Processing 
+Data for the capstone can be found here. <https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip>
+
+
+```{r,echo=TRUE,results='hide',message=FALSE}
+data_directory="~/Documents/coursera/DSCapstone/final"
+# The source and destination of the data set
+
+if(!file.exists(data_directory)){
+    destination_file <- "Coursera-SwiftKey.zip"
+    source_file <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+    # Get the data set
+    download.file(source_file, destination_file,method="curl")
+
+    # extract the data
+    unzip(destination_file)
+}
+```
+
+Corpus has data provided in four languages. As per the assignment we will focus on en_US data set. The Corpora are contained in three seperate plain text `.txt` files.  Load the data for analysis.
+
+In order to enable faster data processing, data sample is generated. In order to create a uniform distribution. 20,000 lines from each feed are taken.
+
+```{r,echo=TRUE,warning=FALSE}
+if(!file.exists("./milestoneReport/fileSummary.rds")){
+    twitter <- readLines("final/en_US/en_US.twitter.txt", encoding = "UTF-8",skipNul=TRUE)
+    blogs <- readLines("final/en_US/en_US.blogs.txt",encoding = "UTF-8",skipNul=TRUE)
+    news <- readLines("final/en_US/en_US.news.txt", encoding = "UTF-8",skipNul=TRUE)
+    
+    set.seed(8534)
+    sampleTwitter <- twitter[sample(1:length(twitter),5000)]
+    sampleNews <- news[sample(1:length(news),5000)]
+    sampleBlogs <- blogs[sample(1:length(blogs),5000)]
+    sample <- c(sampleTwitter,sampleNews,sampleBlogs)
+    writeLines(sample, "./milestoneReport/sample.txt")
+
+    sample <- readLines("./milestoneReport/sample.txt", encoding = "UTF-8",skipNul=TRUE)
+    twitterSize <- round(file.info("final/en_US/en_US.twitter.txt")$size / 1024.0 ^ 2, digits=2)
+    blogsSize <- round(file.info("final/en_US/en_US.blogs.txt")$size / 1024.0 ^ 2, digits=2)
+    newsSize <- round(file.info("final/en_US/en_US.news.txt")$size / 1024.0 ^ 2, digits=2)
+    sampleSize <- round(file.info("milestoneReport/sample.txt")$size / 1024.0 ^ 2, digits=2)
+    
+    twitterLength <- round(length(twitter)/1000,digits=0)
+    blogsLength <- round(length(blogs)/1000,digits=0)
+    newsLength <- round(length(news)/1000,digits=0)
+    sampleLength <- round(length(sample)/1000,digits=0)
+    
+    twitterWords <- round(sum(sapply(gregexpr("\\S+", twitter), length))/1000,digits=0)
+    blogsWords <- round(sum(sapply(gregexpr("\\S+", blogs), length))/1000,digits=0)
+    newsWords <- round(sum(sapply(gregexpr("\\S+", news), length))/1000,digits=0)
+    sampleWords <- round(sum(sapply(gregexpr("\\S+", sample), length))/1000,digits=0)
+    
+    fileSummary <- data.frame(
+            fileName = c("Twitter","Blog","News", "Sample"),
+            fileSize = c(twitterSize,blogsSize,newsSize,sampleSize),
+            lineCount = c(twitterLength,blogsLength,newsLength,sampleLength),
+            wordCount = c(twitterWords, blogsWords, newsWords, sampleWords)                  
+    )
+    colnames(fileSummary) <- c("File Name", "File Size (MB)", "Line Count (Thousands)", "Word Count (Thousands)")
+    saveRDS(fileSummary, file = "./milestoneReport/fileSummary.rds")
+}
+fileSummaryDF <- readRDS("./milestoneReport/fileSummary.rds")
+knitr::kable(head(fileSummaryDF, 10))
+```
+
+As observed from above the files are around 200 MB per file. Blogs and News corpora consists of about 1 million items each, and twitter consists of about 2 million items. Since Twitter messages have a character limit of 140 Character, this explains the reason there are so many more items.
+
+
+### Cleaning and building Corpus
+For performing the predictive model we need to application to be void of certain cases. The goal is to get to clean data set that will help us achieve our final goal. We will use `tm` <https://cran.r-project.org/web/packages/tm/index.html> package to make the work easier of text mining.
+
+The following cleanups will be performed.
+- Lower case
+- Remove puntuation
+- Remove numbers
+- Remove URL
+- Remove White Space
+
+For predicting the next word, it is not very useful if we have to predit "See you at 8", not having numbers is going to help with the scenario. Our model can't predict it, and won't help the user. 
+
+Stop words: Based on research of various articales it is clear that removing stop words would be counter productive and would change the meaning completely. Stop word removal would be counter productive. For our approach we feel having the correct n-Grams will be more valuable for prediction. It is proved below my analysis
+
+
+```{r,echo=TRUE,results='hide'}
+if(!file.exists("./milestoneReport/clean.rds")){
+    sample <- readLines("./milestoneReport/sample.txt", encoding = "UTF-8",skipNul=TRUE)
+    sample.corpus <- VCorpus(VectorSource(sample))
+    sample.corpus <- tm_map(sample.corpus, stripWhitespace) #stripWhitespace: eliminate extra white-spaces
+    sample.corpus <- tm_map(sample.corpus, removeNumbers) #removeNumber: remove numbers
+    removeMostPunctuation<-function (x) {
+                x <- gsub("[^ a-z0-9'-]", " ", x)
+                x <- gsub("(\\w)-(\\w)", "\\1\1\\2", x)
+                x <- gsub("(\\w)'(\\w)", "\\1\2\\2", x)
+                x <- gsub("[[:punct:]]+", "", x)
+                x <- gsub("\1", "-", x, fixed = TRUE)
+                x <- gsub("\2", "'", x, fixed = TRUE)
+                gsub("^'|-", "", x)
+        } # remove all punctuations except intra-word-dashes and inta-word-apostrophes
+    sample.corpus <- tm_map(sample.corpus, content_transformer(removeMostPunctuation)) #custom implementation to remove punctuations
+    sample.corpus <- tm_map(sample.corpus, tolower, lazy=TRUE) #tolower: convert text to lower case
+    sample.corpus <- tm_map(sample.corpus, PlainTextDocument)
+    sample.corpus <- tm_map(sample.corpus, stemDocument)
+    #stemming is applied to documents to remove common words endings for English words, such as "es", "ed" and "s".
+    clean.corpus <- Corpus(VectorSource(sample.corpus))
+    #required to reload the class to avoid errors with DocumentTermMatrix
+    rm(sample.corpus)
+    saveRDS(clean.corpus, file="./milestoneReport/clean.rds")
+    #tdm <- TermDocumentMatrix(clean.corpus)
+    #saveRDS(tdm, file="./milestoneReport/tdm.rds")
+}
+```
+
+### Exploratory Analysis
+In NLP one of the most common method is N-grams. N-grams allows to create a model where a words likelihood is determined by the previous words. An N-Gram of one word is called unigram, two words is bigrams ...
+
+
+```{r,echo=TRUE,results='hide'}
+if(!file.exists("./milestoneReport/trigram.rds")){
+
+con <- gzfile("./milestoneReport/clean.rds")
+corpus <- readRDS(con)
+close(con)
+corpus_df <-data.frame(text=unlist(sapply(corpus,`[`, "content")), stringsAsFactors = FALSE)
+
+
+
+# Function for nGram
+ngramTokenizer <- function(theCorpus, ngramCount) {
+  ngramFunction <- NGramTokenizer(theCorpus, 
+                                  Weka_control(min = ngramCount, max = ngramCount, 
+                                               delimiters = " \\r\\n\\t.,;:\"()?!"))
+  ngramFunction <- data.frame(table(ngramFunction))
+  ngramFunction <- ngramFunction[order(ngramFunction$Freq, 
+                                       decreasing = TRUE),]
+  colnames(ngramFunction) <- c("String","Count")
+  ngramFunction
+}
+
+
+# Generate unigrams and save
+unigrams <- ngramTokenizer(corpus_df, 1)
+saveRDS(unigrams, file = "./milestoneReport/unigram.rds")
+
+# Generate bigrams and save
+bigrams <- ngramTokenizer(corpus_df, 2)
+saveRDS(bigrams, file = "./milestoneReport/bigram.rds")
+
+# Generate trigrams and save
+trigrams <- ngramTokenizer(corpus_df, 3)
+saveRDS(trigrams, file = "./milestoneReport/trigram.rds")
+
+# Generate quatgrams and save
+quagrams <- ngramTokenizer(corpus_df, 4)
+saveRDS(quagrams, file = "./milestoneReport/quagram.rds")
+}
+```
+
+
+```{r,echo=FALSE}
+plot_ngrams <- function(ngram_df) {
+  ggplot(ngram_df[1:30,],
+         aes(x = reorder(String, -Count), y = Count)) + 
+    geom_bar(stat = "Identity", fill = "Sky Blue") +
+    ggtitle("Top 30") + xlab("Phrases") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+con <- gzfile("./milestoneReport/unigram.rds")
+unigrams <- readRDS(con)
+close(con)
+# Plot the n-grams
+plot_ngrams(unigrams)
+
+con <- gzfile("./milestoneReport/bigram.rds")
+bigrams <- readRDS(con)
+close(con)
+plot_ngrams(bigrams)
+
+con <- gzfile("./milestoneReport/trigram.rds")
+trigrams <- readRDS(con)
+close(con)
+plot_ngrams(trigrams)
+
+con <- gzfile("./milestoneReport/quagram.rds")
+quagrams <- readRDS(con)
+close(con)
+plot_ngrams(quagrams)
+```
+
+Analyzing the unigrams, we can see that the top 20 words are quite similar between the data sets. Most of the words are stopwords in English. Hence keeping these as they will be critical in determining the predicted word. 
+
+
